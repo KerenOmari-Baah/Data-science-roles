@@ -1,0 +1,180 @@
+---
+title: "Investigating factors that influence the salaries of data science roles."
+author: 
+  - Keren Omari-Baah
+date: 2023-12-11
+abstract: "This project investigates salaries across differents roles within the data science domain by exploring variability in salaries and identifying the key factors influencing these variations. Using data extracted from data science job postings, our analysis incorporates visualizations and a multiple linear regression model to only predict salaries and pinpoint important factors that lead to salary differences."
+
+format: 
+  html:
+    code-fold: true
+    standalone: true
+    embed-resources: true
+    toc: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE,
+                      message = FALSE,
+                      warnings = FALSE)
+
+options(scipen = 999)
+
+#imports 
+library(tidyverse)
+library(GGally)
+library(parsnip)
+library(broom)
+```
+
+## Introduction
+
+```{=html}
+```
+Data scientists are professionals who work with varied forms of data with the goal of answering important questions of research. They gather meaningful insights from the data using statistics, visualizations, and machine learning models to make informed decisions in their respective areas of business.
+
+The profession has gained immense popularity in recent years, and is greatly coveted by many aspiring individuals. According to Glassdoor, data scientists in the United States typically earn around \$129,198 per year ([Glass door data science salaries](https://www.glassdoor.com/Salaries/us-data-scientist-salary-SRCH_IL.0,2_IN1_KO3,17.htm)) but salaries could vary depending on factors such as experience, level of education, industry, location, area of specialization, among others.
+
+Navigating through this dynamic landscape, a crucial inquiry emerges. Do professionals in the field share equal compensation, or are there variations in salaries? In this work, we aim to investigate this research question. Our primary goal is to first ascertain if there is compensation differences within the field. If so, we want to secondly assess which factors influence compensation differences.
+
+The data used in our investigation were sourced from [kaggle.com](https://www.kaggle.com/datasets/arnabchaki/data-science-salaries-2023/data) which was published by randomarnab. The data were collected by scraping job postings from a job-posting website called [ai-jobs.net](ai-jobs.net).
+
+This research is important because it helps clear up misconceptions about fairness in job roles particularly for professionals who work in data science, management, employers, and policymakers in the data science domain. Also, this research will give useful information to hiring teams to help with deciding how to hire people, keep good workers, and make fair compensation.
+
+## Data
+
+<!-- Put the dataset you want to use into this repository and import it in a chunk here. Describe the relevant aspects of the data here. Also some basic data preparation can already happen here. -->
+
+```{r}
+#| label: data-import
+salaries <- read_csv("ds_salaries.csv")
+```
+
+The observational unit in this dataset is a job posting from the [ai-jobs.net](ai-jobs.net) website. The dataset comprises a total of `r nrow(salaries)` stings, representing the sample size. There are `r ncol(salaries)` variables in total. The response variable we are focusing on is the salary of each job posting, measured in US dollars it is named `salary_in_usd` in the dataset. The explanatory variables to be explored include the following:
+
+| Variable Name        | Description                                                                                                                                                                                                     |
+|----------------|--------------------------------------------------------|
+| `work_year`          | This variable describes the year in which the job posting was created. The years range from 2021 to 2023.                                                                                                       |
+| `experience_level`   | This variable describe the level experience needed for the job being posted. There are four levels of experience Senior level (SE), Executive level (EX), Mid or Intermediate level (MI), and Entry level (EN). |
+| `employment_type`    | This variable describes the type of employment of the role. There are four levels are Full-time (FT), Part-time (PT), Contract (CT), and Freelance (FL).                                                        |
+| `job_title`          | This variable describes the job title of the job posting. There are 93 unique job titles in the dataset.                                                                                                        |
+| `salary`             | This variable describes the total gross compensation to be paid for the role in the job posting. This is measured in the respective salary currency associated with the job posting.                            |
+| `salary_currency`    | This is the currency of the salary to be paid for the role in the job posting. There are 20 unique salary currencies in the dataset.                                                                            |
+| `employee_residence` | This variable describes the employees country of residence during the year of work.                                                                                                                             |
+| `remote_ratio`       | This variable describe if the job is in-person (0), hybrid (50), or fully-remote (100).                                                                                                                         |
+| `company_location`   | This is the country of the employer's main office or where the contracting branch is located. There are 72 unique company locations.                                                                            |
+| `company_size`       | This variable describes the median number of employees that worked for the company during the year of the job posting. There are three unique sizes: less than 100 is small (S), 100-1000 (M), 1000+ (L).       |
+
+### Data Cleaning
+
+```{r}
+#| label: data-manipulation
+salaries <- salaries %>%
+  mutate(work_year = as.factor(work_year),
+         job_title = ifelse(job_title %in% c("Data Scientist", "Data Engineer"), job_title,"Other"),
+         salary_currency = ifelse(salary_currency %in% c("CAD", "EUR", "GBP", "INR", "USD"), salary_currency,"Other"),
+         employee_residence = ifelse(employee_residence %in% c("CA", "DE", "ES","GB", "IN", "US"), employee_residence,"Other"),
+        remote_ratio = recode(remote_ratio, "100" = "Remote","50" = "Hybrid", "0" = "In-person"),
+        company_location = ifelse(company_location %in% c("CA", "DE", "ES","GB", "IN", "US"), company_location,"Other"))
+```
+
+The `work_year` variable was transformed from a quantitative to a categorical variable. This decision was based on the understanding that treating the year as a numeric value wouldn't yield meaningful insights in this context. Analyzing years categorically allows for a more focused investigation of the distinct impacts each year may have.
+
+The `remote_ratio` variable was updated for better clarity. The original numerical values 0, 50, and 100 were changed to more descriptive terms: 'in-person' for 0, 'hybrid' for 50, and 'fully-remote' for 100 making it easier to understand the type of work arrangement each value represents.
+
+For the `job_title` variable, we initially had a broad range of 93 unique titles. Recognizing that many of these titles were infrequent, we streamlined them into three categories to simplify the categories. The revised categories are 'Data Scientist', 'Data Engineer' (both already present in the dataset), and 'Others' which encompasses all remaining job titles.
+
+In a similar way, the `salary_currency` variable was condensed. Originally comprising 20 unique categories, we simplified it to just 6. This involved maintaining CAD, USD, EUR, GBP, and INR as distinct categories, while combining all others into an 'Other' category.
+
+We applied a similar approach to the `employee_residence` variable, which was initially quite diverse with 78 unique entries. This was reduced to 7 categories, namely CA, US, ES, DE, GB, IN, with all remaining nationalities being grouped under 'Other'.
+
+Finally, the `company_location` variable, originally with 72 distinct locations, was also refined to the same 7 categories: CA, US, ES, DE, GB, IN, and an 'Other' category for all remaining locations.
+
+### Visualization
+
+The histogram below suggests that the most frequently occurring salary range is centered around 100,000 USD, as indicated by the highest bars in that region. This is supported by the five-number summary, with a median salary of 135,000 USD and a mean salary that is higher at 137,570 USD. The data exhibit a right skew, with the mean salary exceeding the median, which is also reflected in the histogram, indicating that higher salaries are pulling the average upward. The range of salaries is broad, starting from a minimum of 5,132 USD and reaching up to a maximum of 450,000 USD. Additionally, there are some salaries that are much higher than the majority, particularly those beyond 400,000 USD which could be outliers.
+
+```{r fig.cap="Histogram of job posting salaries in US dollars"}
+ggplot(data = salaries, aes(x = salary_in_usd))+
+  geom_histogram()+ labs(x= 'Salary in US dollars', y = 'Count')+ theme_bw()
+```
+
+```{r}
+summary(salaries$salary_in_usd)
+```
+
+Next, we present a box plot that shows the distribution of salaries in US dollars across four categories of experience levels. The experience level with the highest median salary is the executive level where as the lowest is entry level. Each experience level in the plot shows right-skewed distributions with potential outliers. The experience level with the highest spread of salaries is the mid-level, indicating a diverse range of salaries within this category.
+
+```{r, fig.cap = "Boxplot of salaries in US dollars by experience level"}
+ggplot(data = salaries, aes(x = experience_level, y = salary_in_usd))+
+  geom_boxplot()+
+  theme_bw()+
+  labs(x ='Experience level of professional', y = 'Salary in US dollars')
+```
+
+The boxplot shows the distribution of salaries in US dollars for job postings by company location. It suggests that job postings from companies located in India have the lowest median salary. In contrast, postings from Canada and the United States display the highest median salaries, with both countries showing a similar level, although they both a larger spread, indicating a wider range of salaries. Job postings from all locations except for Canada tend to show a right skew, with outliers indicating salaries that are higher than the typical range for their respective locations.
+
+```{r, fig.cap = "Boxplot of salaries in US dollars by company location"}
+ggplot(data = salaries, aes(x = company_location, y = salary_in_usd))+
+  geom_boxplot()+
+  theme_bw()+
+  labs(x ='Company location', y = 'Salary in US dollars')
+```
+
+The boxplot below shows a distribution of salaries in US dollars for the three categories of company size. From the plot medium sized companies have the highest median where as small sized companies have the lowest. Each company size shows a right skewed distribution with potential outliers. The company size with the highest spread medium sized companies is indicating that there are a lot of medium sized companies.
+
+```{r, fig.cap = "Boxplot of salaries in US dollars by company size"}
+ggplot(data = salaries, aes(x = company_size, y = salary_in_usd))+
+  geom_boxplot()+
+  theme_bw()+
+  labs(x ='Company size', y = 'Salary in US dollars')
+```
+
+We omit some variables out of the dataset when fitting the model. We will discuss those here.
+
+The `salary` variable is in the currency corresponding the currency used by the company. As a result, there is a difference in salary values across different job postings. This poses a challenge as a usable variable because the units of measurement is diverse. However, the converted salary to USD offers a more standardized metric, allowing for consistent value comparison. Thus we will use `salary_in_usd` as our response variable, and exclude `salary` from our analysis.
+
+We will exclude `employee_residence` and `salary_currency` from the plot because of their high similarity, likely leading to multicollinearity. Given their close similarity, retaining both variables in the visualization might introduce redundancy and potentially obscure other meaningful patterns in the data.
+
+```{r}
+salaries <- salaries%>%select(-salary, -employee_residence, -salary_currency)
+```
+
+## Analysis
+
+To answer the research questions we will fit a linear regression model with `salary_in_usd` as the response variable and `work_year`, `experience_level`, `employement_type`, `job_title`, `remote_ratio`, `company_location`, and `company_size` as the explanatory variables.
+
+```{=html}
+```
+```{r}
+#| label: analysis
+
+# Make a statistical analysis (e.g. a model) here. 
+ linear_reg() |> 
+    set_engine("lm") |> 
+    fit(salary_in_usd ~ ., data = salaries)|>
+  tidy()
+
+
+```
+
+Some notable mentions from the model are interpreted in the following. The baseline average salary based on the linear model is is estimated to be \$89,478.46. If the work year was 2021, estimated average salary \$`r format(round(89478.4640-5916.1825,2), format ="d", big.mark=",")`. Similarly, for the year 2023, the estimated average salary is \$`r format(round(89478.4640+7299.5292,2), format="d", big.mark=",")`, with an increase of 7,299.53 USD from the baseline. Looking at the different experience levels, executive level roles are associated with an estimated average salary of \$`r format(round( 89478.4640+95446.4545,2), format="d", big.mark=",")`. Senior level roles had an average salary of \$`r format(round(89478.4640+50952.3804,2), format="d", big.mark=",")` while mid-level positions had an estimated average of \$`r format(round(89478.4640+20255.2535,2), format="d", big.mark=",")`. The model further reveals that companies based in the US have a relatively higher average salary estimated at \$`r format(round(89478.4640+18559.5671,2), format="d", big.mark=",")`. Roles labelled as data scientists, on average, earned the highest average salary of \$`r format(round(89478.4640+4657.2040,2), format="d", big.mark=",")`among the job types.
+
+```{r}
+ linear_reg() |> 
+    set_engine("lm") |> 
+    fit(salary_in_usd ~ ., data = salaries)|>
+  glance()
+```
+
+The model produced a low $R^2$ of 0.35111, which means 35.1% of the variance of salaries in US dollars can be explained by a linear relation with the explanatory variables in the model.
+
+## Conclusion
+
+```{=html}
+```
+The primary objective of this analysis was to understand the factors influencing salaries in the different fields of data science. Our research suggested the presence of several influential factors determining compensation in this domain. These include variables like the job posting's experience level, job type, and company location.
+
+We found out that job postings in the US had relatively higher salaries. Also job postings with an executive level experience had relatively higher salaries. However, the remote ratio had little impact on salaries differences as well as employment type.
+
+Some limitations we encountered were that salary data was derived from a singular source, making it insufficient to represent all data science salaries. Another thing was that we had to bin certain variables like job title, work year, remote ratio among others because there were not many occurrences in the data. Also, we omitted salary from the analysis because they were not recorded in the same currency and used salary in USD instead. For future research, we may want to look at datasets from other websites.
