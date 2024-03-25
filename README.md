@@ -23,7 +23,7 @@ library(broom)
 Clone this repository to your local machine using the terminal (Mac/Linux) or Command Prompt (Windows):
 ```bash
 git clone https://github.com/KerenOmari-Baah/Data-science-roles.git
-cd datascience-salary-analysis-r
+cd datascience-science-roles-r
 ```
 
 ### Data
